@@ -1,11 +1,11 @@
+## Testability & API Documentation
+
+The API is fully testable via Swagger/OpenAPI.
+
 ### Database
 The application uses an in-memory database for integration tests, allowing reviewers to run tests without any external database setup or credentials.
 
 No database secrets are required to build or test the application.
-
-## Testability & API Documentation
-
-The API is fully testable via Swagger/OpenAPI.
 
 ### Swagger
 Swagger UI is available at:
