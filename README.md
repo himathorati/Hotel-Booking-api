@@ -25,3 +25,20 @@ Drops and recreates the database, removing all data and preparing the system for
 
 ### Authentication
 The API does not require authentication. All endpoints are accessible without credentials.
+
+## Testing
+
+This project includes **integration tests** to validate end-to-end API behavior.
+
+### Integration Tests
+- Implemented using **xUnit**, **FluentAssertions**, and **Microsoft.AspNetCore.Mvc.Testing**
+- Tests run against an **in-memory database** for isolation and repeatability
+- Covers:
+  - Hotel search by keyword
+  - Booking creation
+  - Prevention of overlapping bookings
+  - API availability and startup validation
+
+### Run Tests
+```bash
+dotnet test
