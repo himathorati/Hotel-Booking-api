@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using static Microsoft.Extensions.Logging.EventSource.LoggingEventSource;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -26,13 +27,13 @@ app.MapPost("/seed", async (AppDbContext db) =>
 {
     // 1️⃣ Delete dependent entities FIRST
     db.Bookings.RemoveRange(db.Bookings);
-    await db.SaveChangesAsync();    
-
-    db.Hotels.RemoveRange(db.Hotels);
     await db.SaveChangesAsync();
 
     db.Rooms.RemoveRange(db.Rooms);
     await db.SaveChangesAsync();
+
+    db.Hotels.RemoveRange(db.Hotels);
+    await db.SaveChangesAsync();    
 
     await db.Database.EnsureDeletedAsync();
     await db.Database.EnsureCreatedAsync();
@@ -71,10 +72,12 @@ app.MapPost("/reset", async (AppDbContext db) =>
 app.MapGet("/hotels/search", async (string HotelName, AppDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(HotelName))
-        return Results.BadRequest("Search query cannot be empty.");
+    return Results.Ok("Search query cannot be empty.");
+
+    HotelName = HotelName.ToLower();
 
     var hotels = await db.Hotels
-        .Where(h => h.Name.ToLower().Contains(HotelName.ToLower()))
+        .Where(h => h.Name.ToLower().Contains(HotelName))
         .Select(h => new
         {
             h.Id,
@@ -82,9 +85,7 @@ app.MapGet("/hotels/search", async (string HotelName, AppDbContext db) =>
         })
         .ToListAsync();
 
-    return hotels.Any()
-        ? Results.Ok(hotels)
-        : Results.NotFound("No hotels matched your search.");
+    return Results.Ok(hotels);
 });
 
 
@@ -128,65 +129,48 @@ app.MapGet("/availability", async (
             "End date (format: yyyy-MM-dd or yyyy-MM-dd)";
 
         return operation;
-    }); 
+    });
 
 app.MapPost("/book", async (BookingRequest request, AppDbContext db) =>
 {
     var hotel = await db.Hotels
         .Include(h => h.Rooms)
-        .Include(h => h.Bookings)
         .FirstOrDefaultAsync(h => h.Id == request.HotelId);
 
-    if (hotel == null) return Results.NotFound("Hotel not found");
-
+    if (hotel == null)
+        return Results.NotFound("Hotel not found");
 
     var room = hotel.Rooms
-    .Where(r => r.Capacity >= request.People)
-    .FirstOrDefault(r =>
-        !db.Bookings.Any(b =>
-            b.RoomId == r.Id &&
-            request.From <= b.To &&
-            request.To >= b.From
-        ));
-    
+        .OrderBy(r => r.Id)
+        .FirstOrDefault(r => r.Capacity >= request.People);
 
     if (room == null)
-        return Results.BadRequest("No available room");
+        return Results.BadRequest("No suitable room");
 
-    var conflictExists = await db.Bookings.AnyAsync(b =>
-    b.RoomId == room.Id &&
-    request.From <= b.To &&
-    request.To >= b.From);
-    
-    if (conflictExists)
-    {
-        return Results.BadRequest("Room is already booked for the selected dates.");
-    }
+    // ❗ Check overlap ONLY for THIS room
+    var overlapExists = await db.Bookings.AnyAsync(b =>
+        b.RoomId == room.Id &&
+        request.From < b.To &&
+        request.To > b.From
+    );
 
+    if (overlapExists)
+        return Results.BadRequest("Room already booked for selected dates");
 
     var booking = new Booking
     {
         BookingReference = Guid.NewGuid().ToString("N"),
+        HotelId = hotel.Id,
+        RoomId = room.Id,
         From = request.From,
         To = request.To,
-        People = request.People,
-        RoomId = room.Id,
-        HotelId = hotel.Id
+        People = request.People
     };
 
     db.Bookings.Add(booking);
     await db.SaveChangesAsync();
 
-    return Results.Ok(new BookingResponse
-    {
-        BookingReference = booking.BookingReference,
-        From = booking.From,
-        To = booking.To,
-        People = booking.People,
-        HotelName = hotel.Name,
-        RoomType = room.RoomType,
-        RoomCapacity = room.Capacity
-    });
+    return Results.Ok(new { booking.BookingReference });
 })
 .WithOpenApi(operation =>
 {
@@ -231,6 +215,7 @@ app.MapGet("/booking/{reference}", async (string reference, AppDbContext db) =>
 
 app.Run();
 
+public partial class Program { }
 
 public class AppDbContext : DbContext
 {
